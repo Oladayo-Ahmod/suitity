@@ -1,222 +1,186 @@
-/*
-Disclaimer: Use of Unaudited Code for Educational Purposes Only
-This code is provided strictly for educational purposes and has not undergone any formal security audit. 
-It may contain errors, vulnerabilities, or other issues that could pose risks to the integrity of your system or data.
-
-By using this code, you acknowledge and agree that:
-    - No Warranty: The code is provided "as is" without any warranty of any kind, either express or implied. The entire risk as to the quality and performance of the code is with you.
-    - Educational Use Only: This code is intended solely for educational and learning purposes. It is not intended for use in any mission-critical or production systems.
-    - No Liability: In no event shall the authors or copyright holders be liable for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, arising from, out of, or in connection with the use or performance of this code.
-    - Security Risks: The code may not have been tested for security vulnerabilities. It is your responsibility to conduct a thorough security review before using this code in any sensitive or production environment.
-    - No Support: The authors of this code may not provide any support, assistance, or updates. You are using the code at your own risk and discretion.
-
-Before using this code, it is recommended to consult with a qualified professional and perform a comprehensive security assessment. By proceeding to use this code, you agree to assume all associated risks and responsibilities.
-*/
-
 #[lint_allow(self_transfer)]
+#[allow(unused_use)]
+
 module dacade_deepbook::book {
-    use deepbook::clob_v2 as deepbook;
-    use deepbook::custodian_v2 as custodian;
-    use sui::sui::SUI;
-    use sui::tx_context::{TxContext, Self};
-    use sui::coin::{Coin, Self};
-    use sui::balance::{Self};
-    use sui::transfer::Self;
-    use sui::clock::Clock;
+    // Import necessary modules
+     // Import necessary modules
+    use sui::tx_context::{Self, TxContext};
+    use sui::object::{Self, ID, UID};
+    use sui::coin::{Self, Coin};
+    use sui::table::{Table, Self};
+    use sui::transfer;
+    use sui::clock::{Self, Clock};
+    use std::string::{Self, String};
+    use std::vector;
+    use std::option::{Option, none, some};
 
-    const FLOAT_SCALING: u64 = 1_000_000_000;
+    // Error codes
+    const ENoAccount: u64 = 0;
+    const EInsufficientBalance: u64 = 1;
+    const EOutOfBounds: u64 = 2;
+    const EInvalid: u64 = 3;
 
-
-    public fun new_pool<Base, Quote>(payment: &mut Coin<SUI>, ctx: &mut TxContext) {
-        let balance = coin::balance_mut(payment);
-        let fee = balance::split(balance, 100 * 1_000_000_000);
-        let coin = coin::from_balance(fee, ctx);
-
-        deepbook::create_pool<Base, Quote>(
-            1 * FLOAT_SCALING,
-            1,
-            coin,
-            ctx
-        );
+    // Transaction struct
+    struct Transaction has store, copy, drop {
+        transaction_type: String,
+        amount: u64,
+        to: Option<address>,
+        from: Option<address>
     }
 
-    public fun new_custodian_account(ctx: &mut TxContext) {
-        transfer::public_transfer(deepbook::create_account(ctx), tx_context::sender(ctx))
+    
+
+    // Account struct
+    struct Account<phantom COIN> has key, store {
+        id: UID,
+        create_date: u64,
+        updated_date: u64,
+        current_balance: Coin<COIN>,
+        account_address: address,
+        transactions: vector<Transaction>
     }
 
-    public fun make_base_deposit<Base, Quote>(pool: &mut deepbook::Pool<Base, Quote>, coin: Coin<Base>, account_cap: &custodian::AccountCap) {
-        deepbook::deposit_base(pool, coin, account_cap)
+    // Transaction tracker struct
+    struct TransactionTracker<phantom COIN> has key {
+    id: UID,
+    accounts: Table<address, Account<COIN>>
+}
+
+
+    // Create a new transaction tracker
+    public fun create_tracker<COIN>(ctx: &mut TxContext) {
+        let id = object::new(ctx);
+        let accounts = table::new<address, Account<COIN>>(ctx);
+        transfer::share_object(TransactionTracker<COIN> { 
+            id,
+            accounts
+        })
     }
 
-    public fun make_quote_deposit<Base, Quote>(pool: &mut deepbook::Pool<Base, Quote>, coin: Coin<Quote>, account_cap: &custodian::AccountCap) {
-        deepbook::deposit_quote(pool, coin, account_cap)
-    }
-
-    public fun withdraw_base<BaseAsset, QuoteAsset>(
-        pool: &mut deepbook::Pool<BaseAsset, QuoteAsset>,
-        quantity: u64,
-        account_cap: &custodian::AccountCap,
-        ctx: &mut TxContext
-    ) {
-        let base = deepbook::withdraw_base(pool, quantity, account_cap, ctx);
-        transfer::public_transfer(base, tx_context::sender(ctx));
-    }
-
-    public fun withdraw_quote<BaseAsset, QuoteAsset>(
-        pool: &mut deepbook::Pool<BaseAsset, QuoteAsset>,
-        quantity: u64,
-        account_cap: &custodian::AccountCap,
-        ctx: &mut TxContext
-    ) {
-        let quote = deepbook::withdraw_quote(pool, quantity, account_cap, ctx);
-        transfer::public_transfer(quote, tx_context::sender(ctx));
-    }
-
-    public fun place_limit_order<Base, Quote>(
-        pool: &mut deepbook::Pool<Base, Quote>,
-        client_order_id: u64,
-        price: u64, 
-        quantity: u64, 
-        self_matching_prevention: u8,
-        is_bid: bool,
-        expire_timestamp: u64,
-        restriction: u8,
-        clock: &Clock,
-        account_cap: &custodian::AccountCap,
-        ctx: &mut TxContext
-    ): (u64, u64, bool, u64) {
-        deepbook::place_limit_order(
-            pool, 
-            client_order_id, 
-            price, 
-            quantity, 
-            self_matching_prevention, 
-            is_bid, 
-            expire_timestamp, 
-            restriction, 
-            clock, 
-            account_cap, 
-            ctx
-        )
-    }
-
-    public fun place_base_market_order<Base, Quote>(
-        pool: &mut deepbook::Pool<Base, Quote>,
-        account_cap: &custodian::AccountCap,
-        base_coin: Coin<Base>,
-        client_order_id: u64,
-        is_bid: bool,
-        clock: &Clock,
-        ctx: &mut TxContext,
-    ) {
-        let quote_coin = coin::zero<Quote>(ctx);
-        let quantity = coin::value(&base_coin);
-        place_market_order(
-            pool,
-            account_cap,
-            client_order_id,
-            quantity,
-            is_bid,
-            base_coin,
-            quote_coin,
-            clock,
-            ctx
-        )
-    }
-
-    public fun place_quote_market_order<Base, Quote>(
-        pool: &mut deepbook::Pool<Base, Quote>,
-        account_cap: &custodian::AccountCap,
-        quote_coin: Coin<Quote>,
-        client_order_id: u64,
-        is_bid: bool,
-        clock: &Clock,
-        ctx: &mut TxContext,
-    ) {
-        let base_coin = coin::zero<Base>(ctx);
-        let quantity = coin::value(&quote_coin);
-        place_market_order(
-            pool,
-            account_cap,
-            client_order_id,
-            quantity,
-            is_bid,
-            base_coin,
-            quote_coin,
-            clock,
-            ctx
-        )
-    }
-
-    fun place_market_order<Base, Quote>(
-        pool: &mut deepbook::Pool<Base, Quote>,
-        account_cap: &custodian::AccountCap,
-        client_order_id: u64,
-        quantity: u64,
-        is_bid: bool,
-        base_coin: Coin<Base>,
-        quote_coin: Coin<Quote>,
-        clock: &Clock, // @0x6 hardcoded id of the Clock object
-        ctx: &mut TxContext,
-    ) {
-        let (base, quote) = deepbook::place_market_order(
-            pool, 
-            account_cap, 
-            client_order_id, 
-            quantity, 
-            is_bid, 
-            base_coin, 
-            quote_coin, 
-            clock, 
-            ctx
-        );
-        transfer::public_transfer(base, tx_context::sender(ctx));
-        transfer::public_transfer(quote, tx_context::sender(ctx));
-    }
-
-    public fun swap_exact_base_for_quote<Base, Quote>(
-        pool: &mut deepbook::Pool<Base, Quote>,
-        client_order_id: u64,
-        account_cap: &custodian::AccountCap,
-        quantity: u64,
-        base_coin: Coin<Base>,
+    // Create a new account in the transaction tracker
+    public fun create_account<COIN>(
+        tracker: &mut TransactionTracker<COIN>,
         clock: &Clock,
         ctx: &mut TxContext
     ) {
-        let quote_coin = coin::zero<Quote>(ctx);
-        let (base, quote, _) = deepbook::swap_exact_base_for_quote(
-            pool,
-            client_order_id,
-            account_cap,
-            quantity,
-            base_coin,
-            quote_coin,
-            clock,
-            ctx
-        );
-        transfer::public_transfer(base, tx_context::sender(ctx));
-        transfer::public_transfer(quote, tx_context::sender(ctx));
+        assert!(!table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), EInvalid);
+        let account = Account {
+            id: object::new(ctx),
+            create_date: clock::timestamp_ms(clock),
+            updated_date: 0,
+            current_balance: coin::zero(ctx),
+            account_address: tx_context::sender(ctx),
+            transactions: vector::empty<Transaction>()
+        };
+        table::add(&mut tracker.accounts, tx_context::sender(ctx), account);
     }
 
-    public fun swap_exact_quote_for_base<Base, Quote>(
-        pool: &mut deepbook::Pool<Base, Quote>,
-        account_cap: &custodian::AccountCap,
-        quote_coin: Coin<Quote>,
-        client_order_id: u64,
-        quantity: u64,
+    // Record a deposit transaction
+    public fun record_deposit<COIN>(
+        tracker: &mut TransactionTracker<COIN>,
         clock: &Clock,
-        ctx: &mut TxContext,
-    ) {
-        let (base, quote, _) = deepbook::swap_exact_quote_for_base(
-            pool,
-            client_order_id,
-            account_cap,
-            quantity,
-            clock,
-            quote_coin,
-            ctx
-        );
-        transfer::public_transfer(base, tx_context::sender(ctx));
-        transfer::public_transfer(quote, tx_context::sender(ctx));
+        amount: Coin<COIN>,
+        ctx: &mut TxContext
+    ){   
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ENoAccount);
+        let account = table::borrow_mut<address, Account<COIN>>(&mut tracker.accounts, tx_context::sender(ctx));
+        let transaction = Transaction {
+            transaction_type: string::utf8(b"deposit"),
+            amount: coin::value(&amount),
+            to: none(),
+            from: none()
+        };
+        coin::join(&mut account.current_balance, amount);
+        account.updated_date = clock::timestamp_ms(clock);
+        vector::push_back(&mut account.transactions, transaction);
+    }
+    
+    // Record a withdrawal transaction
+    public fun record_withdrawal<COIN>(
+        tracker: &mut TransactionTracker<COIN>,
+        clock: &Clock,
+        amount: u64,
+        ctx: &mut TxContext
+    )
+    {
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ENoAccount);
+        let account = table::borrow_mut<address, Account<COIN>>(&mut tracker.accounts, tx_context::sender(ctx));
+        assert!(coin::value(&account.current_balance) >= amount, EInsufficientBalance);
+        let transaction = Transaction {
+            transaction_type: string::utf8(b"withdraw"),
+            amount: amount,
+            to: none(),
+            from: none()
+        };
+        vector::push_back(&mut account.transactions, transaction);
+        account.updated_date = clock::timestamp_ms(clock);
+        let transfer_coin = coin::split(&mut account.current_balance, amount, ctx);
+        transfer::public_transfer(transfer_coin, tx_context::sender(ctx));
+    }
+
+    // Record a transfer transaction
+    public fun record_transfer<COIN>(
+        tracker: &mut TransactionTracker<COIN>,
+        clock: &Clock,
+        amount: u64,
+        recipient: address,
+        ctx: &mut TxContext
+    )
+    {
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ENoAccount);
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, recipient), EInvalid);
+        assert!(tx_context::sender(ctx) != recipient, EInvalid);
+        let sender_account = table::borrow_mut<address, Account<COIN>>(&mut tracker.accounts, tx_context::sender(ctx));
+        assert!(coin::value(&sender_account.current_balance) >= amount, EInsufficientBalance);
+        sender_account.updated_date = clock::timestamp_ms(clock);
+        let transaction = Transaction {
+            transaction_type: string::utf8(b"transfer"),
+            amount: amount,
+            to: some(recipient),
+            from: some(tx_context::sender(ctx))
+        };
+        vector::push_back(&mut sender_account.transactions, *&transaction);
+        let transfer_coin = coin::split(&mut sender_account.current_balance, amount, ctx);
+        let recipient_account = table::borrow_mut<address, Account<COIN>>(&mut tracker.accounts, recipient);
+        recipient_account.updated_date = clock::timestamp_ms(clock);
+        vector::push_back(&mut recipient_account.transactions, transaction);
+        coin::join(&mut recipient_account.current_balance, transfer_coin);
+    }
+
+    // Accessor functions
+
+    // Get the creation date of the sender's account
+    public fun account_create_date<COIN>(self: &TransactionTracker<COIN>, ctx: &mut TxContext): u64{
+        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ENoAccount);
+        let account = table::borrow<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx));
+        account.create_date
+    }
+
+    // Get the last updated date of the sender's account
+    public fun account_updated_date<COIN>(self: &TransactionTracker<COIN>, ctx: &mut TxContext): u64{
+        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ENoAccount);
+        let account = table::borrow<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx));
+        account.updated_date
+    }
+
+    // Get the current balance of the sender's account
+    public fun account_balance<COIN>(self: &TransactionTracker<COIN>, ctx: &mut TxContext): u64{
+        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ENoAccount);
+        let account = table::borrow<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx));
+        coin::value(&account.current_balance)
+    }
+
+    // Get the number of accounts in the tracker
+    public fun tracker_accounts_length<COIN>(self: &TransactionTracker<COIN>): u64{
+        table::length(&self.accounts)
+    }
+
+    // View a specific transaction of the sender's account
+    public fun view_account_transaction<COIN>(tracker: &TransactionTracker<COIN>, index: u64, ctx: &mut TxContext): (String, u64, Option<address>, Option<address>){
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ENoAccount);
+        let account = table::borrow<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx));
+        assert!(index < vector::length(&account.transactions),EOutOfBounds);
+        let transaction = vector::borrow(&account.transactions, index);
+        (transaction.transaction_type, transaction.amount, transaction.to, transaction.from)
     }
 }
