@@ -143,7 +143,6 @@ module dacade_deepbook::book {
         coin::join(&mut recipient_account.current_balance, transfer_coin); // Updating the recipient's account balance
     }
 
-    // Accessor functions
 
     // Get the creation date of the sender's account
     public fun account_create_date<COIN>(self: &TransactionTracker<COIN>, ctx: &mut TxContext): u64 {
@@ -212,5 +211,35 @@ module dacade_deepbook::book {
         let account = table::borrow<address, Account<COIN>>(&tracker.accounts, account_address); // Borrowing reference to the account
         vector::length(&account.transactions)
     }
+
+    public fun search_transactions_by_type<COIN>(
+        tracker: &TransactionTracker<COIN>,
+        account_address: address,
+        transaction_type: String,
+        ctx: &mut TxContext
+        ): Option<vector<TransactionInfo>> {
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, account_address), ENoAccount); // Asserting if the account exists
+        let account = table::borrow<address, Account<COIN>>(&tracker.accounts, account_address); // Borrowing reference to the account
+        let matching_transactions: vector<TransactionInfo> = vector::empty();
+        let i = 0;
+        while (i < vector::length(&account.transactions)) {
+            let transaction = vector::borrow(&account.transactions, i);
+            if (transaction.transaction_type == transaction_type) {
+            vector::push_back(&mut matching_transactions, TransactionInfo {
+                transaction_type: transaction.transaction_type.clone(), // Clone to avoid ownership issues
+                amount: transaction.amount,
+                to: transaction.to,
+                from: transaction.from,
+            });
+        };
+        i += 1; 
+    }
+    if (vector::is_empty(&matching_transactions)) {
+        none()
+    } else {
+        some(matching_transactions)
+    }
+}
+
 
 }
