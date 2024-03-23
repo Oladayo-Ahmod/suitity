@@ -1,6 +1,7 @@
 #[lint_allow(self_transfer)] // Allowing self transfer lint
 #[allow(unused_use)] // Allowing unused imports
 
+
 module dacade_deepbook::book {
     // Import necessary modules
     use sui::tx_context::{Self, TxContext}; // Importing TxContext module
@@ -14,10 +15,11 @@ module dacade_deepbook::book {
     use std::option::{Option, none, some}; // Importing Option module with specific items
 
     // Error codes
-    const ENoAccount: u64 = 0; // Error code for no account
-    const EInsufficientBalance: u64 = 1; // Error code for insufficient balance
-    const EOutOfBounds: u64 = 2; // Error code for out of bounds
-    const EInvalid: u64 = 3; // Error code for invalid operation
+    const ACCOUNT_NOT_FOUND: u64 = 0; // error code for account thet does not exist
+    const INSUFFICIENT_BALANCE: u64 = 1; // error code insufficient balance
+    const INVALID_INDEX: u64 = 2; // error code for invalid index
+    const INVALID_OPERATION: u64 = 3; // error code for invalid operation
+
 
     // Transaction struct
     struct Transaction has store, copy, drop { // Defining the Transaction struct
@@ -59,7 +61,7 @@ module dacade_deepbook::book {
         clock: &Clock,
         ctx: &mut TxContext
     ) {
-        assert!(!table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), EInvalid); // Asserting if the account already exists
+        assert!(!table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), INVALID_INDEX); // Asserting if the account already exists
         let account = Account { // Creating a new account
             id: object::new(ctx),
             create_date: clock::timestamp_ms(clock),
@@ -78,7 +80,7 @@ module dacade_deepbook::book {
         amount: Coin<COIN>,
         ctx: &mut TxContext
     ){   
-        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ENoAccount); // Asserting if the account exists
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ACCOUNT_NOT_FOUND); // Asserting if the account exists
         let account = table::borrow_mut<address, Account<COIN>>(&mut tracker.accounts, tx_context::sender(ctx)); // Borrowing mutable reference to the account
         let transaction = Transaction { // Creating a deposit transaction
             transaction_type: string::utf8(b"deposit"),
@@ -98,9 +100,9 @@ module dacade_deepbook::book {
         amount: u64,
         ctx: &mut TxContext
     ) {
-        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ENoAccount); // Asserting if the account exists
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ACCOUNT_NOT_FOUND); // Asserting if the account exists
         let account = table::borrow_mut<address, Account<COIN>>(&mut tracker.accounts, tx_context::sender(ctx)); // Borrowing mutable reference to the account
-        assert!(coin::value(&account.current_balance) >= amount, EInsufficientBalance); // Asserting if sufficient balance is available
+        assert!(coin::value(&account.current_balance) >= amount, INSUFFICIENT_BALANCE); // Asserting if sufficient balance is available
         let transaction = Transaction { // Creating a withdrawal transaction
             transaction_type: string::utf8(b"withdraw"),
             amount: amount,
@@ -121,11 +123,11 @@ module dacade_deepbook::book {
         recipient: address,
         ctx: &mut TxContext
     ) {
-        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ENoAccount); // Asserting if the sender's account exists
-        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, recipient), EInvalid); // Asserting if the recipient's account exists
-        assert!(tx_context::sender(ctx) != recipient, EInvalid); // Asserting if sender and recipient are different
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ACCOUNT_NOT_FOUND); // Asserting if the sender's account exists
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, recipient), INVALID_INDEX); // Asserting if the recipient's account exists
+        assert!(tx_context::sender(ctx) != recipient, INVALID_INDEX); // Asserting if sender and recipient are different
         let sender_account = table::borrow_mut<address, Account<COIN>>(&mut tracker.accounts, tx_context::sender(ctx)); // Borrowing mutable reference to sender's account
-        assert!(coin::value(&sender_account.current_balance) >= amount, EInsufficientBalance); // Asserting if sufficient balance is available
+        assert!(coin::value(&sender_account.current_balance) >= amount, INSUFFICIENT_BALANCE); // Asserting if sufficient balance is available
         sender_account.updated_date = clock::timestamp_ms(clock); // Updating the sender's account's updated date
         let transaction = Transaction { // Creating a transfer transaction
             transaction_type: string::utf8(b"transfer"),
@@ -145,21 +147,21 @@ module dacade_deepbook::book {
 
     // Get the creation date of the sender's account
     public fun account_create_date<COIN>(self: &TransactionTracker<COIN>, ctx: &mut TxContext): u64 {
-        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ENoAccount); // Asserting if the sender's account exists
+        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ACCOUNT_NOT_FOUND); // Asserting if the sender's account exists
         let account = table::borrow<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)); // Borrowing reference to the sender's account
         account.create_date // Returning the creation date
     }
 
     // Get the last updated date of the sender's account
     public fun account_updated_date<COIN>(self: &TransactionTracker<COIN>, ctx: &mut TxContext): u64 {
-        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ENoAccount); // Asserting if the sender's account exists
+        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ACCOUNT_NOT_FOUND); // Asserting if the sender's account exists
         let account = table::borrow<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)); // Borrowing reference to the sender's account
         account.updated_date // Returning the last updated date
     }
 
     // Get the current balance of the sender's account
     public fun account_balance<COIN>(self: &TransactionTracker<COIN>, ctx: &mut TxContext): u64 {
-        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ENoAccount); // Asserting if the sender's account exists
+        assert!(table::contains<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)), ACCOUNT_NOT_FOUND); // Asserting if the sender's account exists
         let account = table::borrow<address, Account<COIN>>(&self.accounts, tx_context::sender(ctx)); // Borrowing reference to the sender's account
         coin::value(&account.current_balance) // Returning the current balance
     }
@@ -171,10 +173,44 @@ module dacade_deepbook::book {
 
     // View a specific transaction of the sender's account
     public fun view_account_transaction<COIN>(tracker: &TransactionTracker<COIN>, index: u64, ctx: &mut TxContext): (String, u64, Option<address>, Option<address>) {
-        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ENoAccount); // Asserting if the sender's account exists
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)), ACCOUNT_NOT_FOUND); // Asserting if the sender's account exists
         let account = table::borrow<address, Account<COIN>>(&tracker.accounts, tx_context::sender(ctx)); // Borrowing reference to the sender's account
-        assert!(index < vector::length(&account.transactions), EOutOfBounds); // Asserting if the index is within bounds
+        assert!(index < vector::length(&account.transactions), INVALID_OPERATION); // Asserting if the index is within bounds
         let transaction = vector::borrow(&account.transactions, index); // Borrowing the transaction at the specified index
         (transaction.transaction_type, transaction.amount, transaction.to, transaction.from) // Returning transaction details
     }
+
+     // View a specific transaction of any account
+    public fun view_transaction<COIN>(tracker: &TransactionTracker<COIN>, account_address: address, index: u64): Option<Transaction> {
+            assert!(table::contains<address, Account<COIN>>(&tracker.accounts, account_address), ACCOUNT_NOT_FOUND); // Asserting if the account exists
+            let account = table::borrow<address, Account<COIN>>(&tracker.accounts, account_address); // Borrowing reference to the account
+            assert!(index < vector::length(&account.transactions), INVALID_OPERATION); // Asserting if the index is within bounds
+            let transaction = vector::borrow(&account.transactions, index); // Borrowing the transaction at the specified index
+            
+            // Wrap data in TransactionInfo struct
+            some(Transaction {
+                transaction_type: transaction.transaction_type,
+                amount: transaction.amount,
+                to: transaction.to,
+                from: transaction.from,
+            })
+    }
+
+     // Get the balance of any account
+    public fun get_account_balance<COIN>(tracker: &TransactionTracker<COIN>, account_address: address): Option<u64> {
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, account_address), ACCOUNT_NOT_FOUND); // Asserting if the account exists
+        let account = table::borrow<address, Account<COIN>>(&tracker.accounts, account_address); // Borrowing reference to the account
+        some(coin::value(&account.current_balance)) // Returning the current balance
+    }
+
+    //  Retrieves the total number of transactions associated with a specific account.
+    public fun get_account_transactions_length<COIN>(
+        tracker: &TransactionTracker<COIN>,
+        account_address: address
+        ): u64 {
+        assert!(table::contains<address, Account<COIN>>(&tracker.accounts, account_address), ACCOUNT_NOT_FOUND); // Asserting if the account exists
+        let account = table::borrow<address, Account<COIN>>(&tracker.accounts, account_address); // Borrowing reference to the account
+        vector::length(&account.transactions)
+    }
+
 }
